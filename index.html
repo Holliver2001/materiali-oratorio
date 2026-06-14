@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Materiale Animatori</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2C3E50">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--primary:#2C3E50;--accent:#27AE60;--light:#F4F6F9;--card:#fff;--danger:#c0392b;--neutral:#7f8c8d}
+body{margin:0;font-family:Segoe UI,sans-serif;background:var(--light);color:var(--primary)}
+header{background:var(--primary);color:#fff;padding:15px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.container{max-width:1000px;margin:auto;padding:20px}
+.card{background:var(--card);padding:15px;margin-bottom:12px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.badge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:12px;color:#fff;margin-right:6px}
+.green{background:var(--accent)} .grey{background:var(--neutral)} .red{background:var(--danger)}
+.hidden{display:none}
+#search{width:100%;padding:12px;border-radius:8px;border:1px solid #ccc;box-sizing:border-box}
+button{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;background:var(--primary);color:white}
+.clickable{cursor:pointer;text-decoration:underline}
+select{padding:8px;border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+<div><strong>📦 Materiale Animatori</strong></div>
+<select id="menu">
+<option value="ricerca">Ricerca</option>
+<option value="container">Container</option>
+<option value="magazzino">Magazzino</option>
+</select>
+</header>
+
+<div class="container">
+<div id="ricercaView">
+<input id="search" placeholder="Cerca materiale o gioco...">
+<div id="results">Caricamento dati...</div>
+</div>
+<div id="containerView" class="hidden"></div>
+<div id="magazzinoView" class="hidden"></div>
+</div>
+
+<script>
+let materiali=[], giochi=[], materialiMap=new Map();
+
+function pos(m){
+ const s=(m.scaffale||"").trim(), r=(m.ripiano||"").trim();
+ if(!s&&!r) return "NON INDICATA";
+ if(s&&!r) return s.toUpperCase();
+ if(!s&&r) return r;
+ return s.toUpperCase()+r;
+}
+const stabBadge=s=>`<span class="badge green">${s.toUpperCase()}</span>`;
+const posBadge=p=>`<span class="badge ${p==="NON INDICATA"?"grey":"green"}">${p}</span>`;
+
+async function caricaExcel(){
+ try{
+  const res=await fetch("inventario.xlsx");
+  const data=await res.arrayBuffer();
+  const wb=XLSX.read(data);
+
+  ["Container","Magazzino"].forEach(sheet=>{
+   const ws=wb.Sheets[sheet];
+   if(!ws) return;
+   XLSX.utils.sheet_to_json(ws).forEach(r=>{
+    const m={
+      nome:String(r.Descrizione||"").trim(),
+      scaffale:r.Scaffale?String(r.Scaffale):"",
+      ripiano:r.Ripiano?String(r.Ripiano):"",
+      stabilimento:sheet.toLowerCase()
+    };
+    materiali.push(m);
+    materialiMap.set(m.nome.toLowerCase(),m);
+   });
+  });
+
+  const gws=wb.Sheets["Giochi"];
+  if(gws){
+   giochi=XLSX.utils.sheet_to_json(gws).map(r=>({
+    nome:String(r.Descrizione||"").trim(),
+    materiali:String(r.Materiali||"").split(";").map(x=>x.trim()).filter(Boolean)
+   }));
+  }
+
+  document.getElementById("results").innerHTML="Inserisci un termine di ricerca.";
+  renderInventario("container");
+  renderInventario("magazzino");
+ }catch(e){
+  document.getElementById("results").innerHTML="Errore caricamento inventario.xlsx";
+  console.error(e);
+ }
+}
+
+function renderRicerca(q){
+ const v=document.getElementById("results");
+ v.innerHTML="";
+ if(!q){v.innerHTML="Inserisci un termine di ricerca.";return;}
+ q=q.toLowerCase();
+
+ const mats=materiali.filter(m=>m.nome.toLowerCase().includes(q));
+ const gms=giochi.filter(g=>g.nome.toLowerCase().includes(q));
+
+ if(!mats.length&&!gms.length){v.innerHTML="Nessun risultato.";return;}
+
+ mats.forEach((m,i)=>{
+  const gid="g"+i;
+  const usati=giochi.filter(g=>g.materiali.some(x=>x.toLowerCase()===m.nome.toLowerCase()));
+  v.innerHTML+=`<div class="card"><strong>${m.nome}</strong><br>
+  ${stabBadge(m.stabilimento)} ${posBadge(pos(m))}
+  <div><button onclick="document.getElementById('${gid}').classList.toggle('hidden')">Mostra giochi (${usati.length})</button></div>
+  <div id="${gid}" class="hidden"><ul>${
+   usati.map(g=>`<li class="clickable" onclick="cercaGioco('${g.nome.replace(/'/g,"\\'")}')">${g.nome}</li>`).join("")
+  }</ul></div></div>`;
+ });
+
+ gms.forEach(g=>{
+  let html="";
+  g.materiali.forEach(n=>{
+   const m=materialiMap.get(n.toLowerCase());
+   html+=m?`<li>${m.nome}<br>${stabBadge(m.stabilimento)} ${posBadge(pos(m))}</li>`
+           :`<li>${n} <span class="badge red">NON TROVATO</span></li>`;
+  });
+  v.innerHTML+=`<div class="card"><strong>${g.nome}</strong><ul>${html}</ul></div>`;
+ });
+}
+
+function cercaGioco(nome){
+ document.getElementById("menu").value="ricerca";
+ mostra("ricerca");
+ document.getElementById("search").value=nome;
+ renderRicerca(nome);
+ window.scrollTo({top:0,behavior:"smooth"});
+}
+
+function renderInventario(stab){
+ const view=document.getElementById(stab+"View");
+ const lista=materiali.filter(m=>m.stabilimento===stab).sort((a,b)=>a.nome.localeCompare(b.nome));
+ view.innerHTML="<h2>"+(stab==="container"?"Container":"Magazzino")+"</h2>";
+ lista.forEach(m=>{
+  view.innerHTML+=`<div class="card"><strong>${m.nome}</strong><br>${posBadge(pos(m))}</div>`;
+ });
+}
+
+function mostra(nome){
+ ["ricerca","container","magazzino"].forEach(v=>document.getElementById(v+"View").classList.add("hidden"));
+ document.getElementById(nome+"View").classList.remove("hidden");
+}
+
+document.getElementById("search").addEventListener("input",e=>renderRicerca(e.target.value));
+document.getElementById("menu").addEventListener("change",e=>mostra(e.target.value));
+
+if("serviceWorker" in navigator){navigator.serviceWorker.register("service-worker.js");}
+caricaExcel();
+</script>
+</body>
+</html>
